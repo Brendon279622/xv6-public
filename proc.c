@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "pstat.h"
 
 struct {
   struct spinlock lock;
@@ -13,6 +14,7 @@ struct {
 } ptable;
 
 static struct proc *initproc;
+int seed;
 
 int nextpid = 1;
 extern void forkret(void);
@@ -38,10 +40,10 @@ struct cpu*
 mycpu(void)
 {
   int apicid, i;
-  
+
   if(readeflags()&FL_IF)
     panic("mycpu called with interrupts enabled\n");
-  
+
   apicid = lapicid();
   // APIC IDs are not guaranteed to be contiguous. Maybe we should have
   // a reverse map, or reserve a register to store &cpus[i].
@@ -88,6 +90,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->tickets = 1;
+  p->ticks = 0;
 
   release(&ptable.lock);
 
@@ -124,7 +128,7 @@ userinit(void)
   extern char _binary_initcode_start[], _binary_initcode_size[];
 
   p = allocproc();
-  
+
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
     panic("userinit: out of memory?");
@@ -199,7 +203,8 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
-
+  np->tickets = curproc->tickets;
+  np->ticks = curproc->ticks;
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
@@ -275,7 +280,7 @@ wait(void)
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
-  
+
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
@@ -311,6 +316,21 @@ wait(void)
   }
 }
 
+int seed = 1049437;
+
+
+int prng()
+{
+  long unsigned int lo = 16807 * (seed & 0xFFFF);
+  long unsigned int hi = 16807 * (seed >> 16);
+  lo += (hi & 0xFFFF) << 16;
+  lo += hi >> 15;
+  if(lo > 0x7FFFFFFF)
+  {
+    lo -= 0x7FFFFFFF;
+  }
+  return (seed = (long)lo );
+}
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -319,23 +339,55 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+
 void
 scheduler(void)
 {
+  struct pstat ps;
+  int winner_ticket = 0;
+  int count = 0;
+  int total_Tickets;
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+  int index =0;
+  total_Tickets=0;
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++, index ++)
+  {
+    if(p->state==RUNNABLE)
+    {
+      ps.tickets[index]=p->tickets;
+      total_Tickets = total_Tickets + ps.tickets[index];
+    }
+  }
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
+    winner_ticket = 0;
+    count = 0;
+
+    winner_ticket = prng();
+    if(total_Tickets==0)
+    {
+      continue;
+    }
+    winner_ticket = winner_ticket%total_Tickets;
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+
+
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
 
+      if((count + p->tickets) < winner_ticket )
+      {
+        count += p->tickets;
+        continue;
+      }
+      p->ticks++;
       // Switch to chosen process.  It is the process's job
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
@@ -349,7 +401,9 @@ scheduler(void)
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
+      break;
     }
+
     release(&ptable.lock);
 
   }
@@ -418,7 +472,7 @@ void
 sleep(void *chan, struct spinlock *lk)
 {
   struct proc *p = myproc();
-  
+
   if(p == 0)
     panic("sleep");
 
@@ -531,4 +585,40 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int
+getpinfo(void)
+{
+
+  struct pstat *ps;
+  struct proc *proc;
+
+
+  int index = 0;
+
+  if(argptr(0, (void*)&ps, sizeof(struct pstat*) < 0))
+  {
+
+    return -1;
+  }
+
+  for(proc = ptable.proc; proc < &ptable.proc[NPROC]; proc++, index++)
+  {
+    if(proc->state==UNUSED)
+    {
+      ps->inuse[index]=0;
+    }
+    else
+    {
+      ps->inuse[index]=1;
+    }
+    ps->pid[index]=proc->pid;
+    ps->tickets[index]=proc->tickets;
+    ps->ticks[index]= proc->ticks;
+
+  }
+
+  return 0;
+
 }

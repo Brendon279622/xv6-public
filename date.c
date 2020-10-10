@@ -11,6 +11,8 @@ main(int argc, char *argv[])
   if(date(&r)){
     printf(2, "date failed\n" );
   }
+
   printf(2, "%d/%d/%d %d:%d:%d\n", r.month, r.day, r.year, r.hour, r.minute, r.second);
+  
   exit();
 }

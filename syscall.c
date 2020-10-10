@@ -6,7 +6,7 @@
 #include "proc.h"
 #include "x86.h"
 #include "syscall.h"
-
+int printBool=0;
 // User code makes a system call with INT T_SYSCALL.
 // System call number in %eax.
 // Arguments on the stack, from the user call to the C
@@ -78,7 +78,7 @@ argstr(int n, char **pp)
 {
   int addr;
   if(argint(n, &addr) < 0)
-    return -1;
+    return -2;
   return fetchstr(addr, pp);
 }
 
@@ -104,6 +104,8 @@ extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
 extern int sys_date(void);
+extern int sys_settickets(void);
+extern int sys_getpinfo(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -128,6 +130,9 @@ static int (*syscalls[])(void) = {
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
 [SYS_date]    sys_date,
+[SYS_settickets] sys_settickets,
+[SYS_getpinfo] sys_getpinfo,
+
 };
 
 static char (*syscall_names[]) =
@@ -154,14 +159,16 @@ static char (*syscall_names[]) =
  [SYS_mkdir]   "mkdir",
  [SYS_close]   "close",
  [SYS_date]    "date",
+ [SYS_settickets] "settickets",
+ [SYS_getpinfo] "getpinfo",
 };
+
 
 void
 syscall(void)
 {
   int num;
   struct proc *curproc = myproc();
-  int printBool =0;
   num = curproc->tf->eax;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     curproc->tf->eax = syscalls[num]();

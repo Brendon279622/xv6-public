@@ -94,13 +94,35 @@ int
 sys_date(void)
 {
   struct rtcdate* r;
-  
+
   if (argptr(0, (void*)&r, sizeof(struct rtcdate*)) < 0)
   {
     return -1;
   }
-  
   cmostime(r);
 
   return 0;
+}
+
+int
+sys_settickets(void)
+{
+  int ticketnum;
+
+  struct proc *proc = myproc();
+
+  if(argint(0, &ticketnum)< 0)
+  {
+    proc->tickets = 1;
+    return -1;
+  }
+
+  proc->tickets = ticketnum;
+
+  return 0;
+}
+
+int sys_getpinfo(void)
+{
+  return getpinfo();
 }
